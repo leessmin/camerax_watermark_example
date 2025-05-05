@@ -2,18 +2,11 @@ package com.example.jc_camerax
 
 import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.annotation.RequiresPermission
 import androidx.camera.compose.CameraXViewfinder
-import androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA
-import androidx.camera.core.Preview
-import androidx.camera.core.SurfaceRequest
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.lifecycle.awaitInstance
 import androidx.camera.video.Quality
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,20 +26,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.app.ActivityCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.jc_camerax.ui.theme.Jc_cameraxTheme
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.google.accompanist.permissions.shouldShowRationale
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 
 class MainActivity : ComponentActivity() {
@@ -132,12 +120,20 @@ private fun CameraPreviewContent(
                     viewModel.setQualitySelector(lifecycleOwner, Quality.UHD)
                 }
             ) { Text("2160p") }
+
+            Button(
+                enabled = !cameraPreviewState.isRecorder,
+                onClick = {
+                    viewModel.setQualitySelector(lifecycleOwner, Quality.SD)
+                }
+            ) { Text("480P") }
+
             Button(
                 onClick = {
                     if (cameraPreviewState.isRecorder) {
-                        viewModel.stopRecorder()
+                        viewModel.stopRecorderJob(lifecycleOwner)
                     } else {
-                        viewModel.startRecorder(context)
+                        viewModel.startRecorderJob(context, lifecycleOwner)
                     }
                 }) {
                 if (cameraPreviewState.isRecorder) {
