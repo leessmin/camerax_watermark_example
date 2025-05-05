@@ -1,63 +1,30 @@
 package com.example.jc_camerax
 
-import android.Manifest
-import android.app.Application
-import android.content.ContentValues
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.ImageFormat
-import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.Rect
-import android.graphics.YuvImage
-import android.media.ImageWriter
-import android.os.Handler
-import android.os.Looper
-import android.provider.MediaStore
 import android.util.Log
-import android.view.Surface
-import androidx.annotation.OptIn
-import androidx.annotation.RequiresPermission
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
-import androidx.camera.core.CameraEffect
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceRequest
-import androidx.camera.core.UseCaseGroup
-import androidx.camera.effects.OverlayEffect
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.lifecycle.awaitInstance
-import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
-import androidx.camera.video.QualitySelector
-import androidx.camera.video.Recorder
-import androidx.camera.video.Recording
-import androidx.camera.video.VideoCapture
-import androidx.camera.video.VideoRecordEvent
-import androidx.core.content.ContextCompat
-import androidx.core.graphics.createBitmap
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import java.io.ByteArrayOutputStream
-import java.text.SimpleDateFormat
-import java.time.LocalDateTime
+import kotlinx.coroutines.launch
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
-import java.util.Locale
-import java.util.concurrent.Executors
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 private const val TAG = "CameraPreviewViewModel"
 
@@ -91,12 +58,37 @@ class CameraPreviewViewModel(
         cameraController.bindToCamera(context, lifecycleCamera)
     }
 
+    // 视频存储的文件夹
+    private var dirPath = ""
+
+    private var recordingJob: Job? = null
+
     // 开始录像
-    fun startRecorder(context: Context) {
+    fun startRecorderJob(context: Context,lifecycleCamera: LifecycleOwner) {
         if (cameraPreviewState.value.isRecorder) {
             return
         }
-        cameraController.startRecorder(context)
+
+        val currentZonedDateTime = ZonedDateTime.now()
+        dirPath = currentZonedDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+
+        recordingJob = CoroutineScope(Dispatchers.Main).launch {
+            try {
+                while (true) {
+                    cameraController.startRecorder(context, dirPath)
+                    delay(10.seconds)
+                    cameraController.stopRecorder(lifecycleCamera)
+                }
+            } catch (e: CancellationException) {
+                // 取消协程后取消录制
+                cameraController.stopRecorder(lifecycleCamera)
+            } catch (e: Exception) {
+                Log.e(TAG, "录制视频还能出错?")
+                e.printStackTrace()
+            }
+        }
+
+
         _cameraPreviewState.update {
             it.copy(
                 isRecorder = true
@@ -105,11 +97,16 @@ class CameraPreviewViewModel(
     }
 
     // 停止录像
-    fun stopRecorder() {
+    fun stopRecorderJob(lifecycleCamera: LifecycleOwner) {
         if (!cameraPreviewState.value.isRecorder) {
             return
         }
-        cameraController.stopRecorder()
+
+        recordingJob?.cancel()
+        recordingJob = null
+
+        cameraController.stopRecorder(lifecycleCamera)
+
         _cameraPreviewState.update {
             it.copy(
                 isRecorder = false

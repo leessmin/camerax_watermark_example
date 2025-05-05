@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
+import android.util.Range
 import android.view.Surface
 import androidx.camera.core.CameraEffect
 import androidx.camera.core.CameraSelector
@@ -22,6 +23,7 @@ import androidx.camera.core.UseCaseGroup
 import androidx.camera.effects.OverlayEffect
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.lifecycle.awaitInstance
+import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
@@ -38,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -144,11 +147,14 @@ class CameraController(
 
     // 创建VideoCapture
     private fun createVideoCapture(): VideoCapture<Recorder> {
-        return VideoCapture.withOutput(
+        return VideoCapture.Builder(
             Recorder.Builder().setQualitySelector(QualitySelector.from(quality)).build()
-        ).apply {
-            targetRotation = rotation
+        ).let {
+            it.setTargetFrameRate(Range.create(50, 60))
+            it.setTargetRotation(rotation)
+            it.build()
         }
+
     }
 
     // 创建useCaseGroup
@@ -160,8 +166,12 @@ class CameraController(
             .build()
     }
 
-    // 将useCaseGroup（这个是类的成员变量，只要他更改了就一起更改） 重新应用到相机
+    // 重新绑定相机实例
     private fun reapplyBindToLifecycle(lifecycleCamera: LifecycleOwner) {
+        _videoCapture = createVideoCapture()
+
+        useCaseGroup = createUseCaseGroup()
+
         // 重新应用到相机
         _processCameraProvider.apply {
             this!!.unbindAll()
@@ -198,8 +208,8 @@ class CameraController(
         _cameraPreview.surfaceProvider = surfaceProvider
     }
 
-    // 开始录像
-    fun startRecorder(context: Context) {
+    // 开始录像  dirPath存储文件的父级文件夹
+    fun startRecorder(context: Context, dirPath: String) {
         if (_record != null) {
             // _record不为空说明已经在录制了
             Log.e(TAG, "_record!=null，不能重复录制")
@@ -207,16 +217,23 @@ class CameraController(
         }
 
 
-        val name = "CameraX-recording-" + SimpleDateFormat(
-            "yyyy-MM-DD HH:mm:ss", Locale.US
+        val name = SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss", Locale.US
         ).format(System.currentTimeMillis()) + ".mp4"
 
+        /*
+        外部存储
         val contentValues = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)
         }
         val mediaStoreOutput = MediaStoreOutputOptions.Builder(
             context.contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         ).setContentValues(contentValues).build()
+        */
+
+
+        val videoFile = File("${context.filesDir}/video/${dirPath}", name)
+        val fileOutputOptions = FileOutputOptions.Builder(videoFile).build()
 
         if (ActivityCompat.checkSelfPermission(
                 context,
@@ -226,8 +243,9 @@ class CameraController(
             Log.e(TAG, "不存在录音权限")
             return
         }
+
         _record =
-            _videoCapture.output.prepareRecording(context, mediaStoreOutput).withAudioEnabled()
+            _videoCapture.output.prepareRecording(context, fileOutputOptions).withAudioEnabled()
                 .start(ContextCompat.getMainExecutor(context)) { videoRecordEvent ->
                     when (videoRecordEvent) {
                         is VideoRecordEvent.Start -> {
@@ -250,7 +268,7 @@ class CameraController(
     }
 
     // 停止录像
-    fun stopRecorder() {
+    fun stopRecorder(lifecycleCamera: LifecycleOwner) {
         if (_record == null) {
             Log.e(TAG, "_record==null, 录制未开启")
             return
@@ -259,6 +277,9 @@ class CameraController(
         _record?.stop()
 
         _record = null
+
+        // TODO: 重新绑定实例 不是最完美的解决方案，会存在黑屏
+        reapplyBindToLifecycle(lifecycleCamera)
     }
 
     // 修改视频质量
@@ -273,10 +294,7 @@ class CameraController(
 
         quality = funQuality
 
-        _videoCapture = createVideoCapture()
-
-        useCaseGroup = createUseCaseGroup()
-
         reapplyBindToLifecycle(lifecycleCamera)
     }
+
 }
